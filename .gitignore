@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+env/
+
+# Secrets
+.env
+*.json.key
+serviceAccountKey.json
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Uploaded or generated photos
+uploads/

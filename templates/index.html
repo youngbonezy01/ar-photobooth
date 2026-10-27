@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shutter & Strip — Photobooth</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,500&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+
+</head>
+<body>
+
+<div class="grain-overlay"></div>
+
+<!-- ===================== SCREEN: START ===================== -->
+<section id="screen-start" class="screen active">
+  <div class="start-wrap">
+    <p class="eyebrow">shutter &amp; strip</p>
+    <h1 class="hero-title">Strike a pose.<br>Take the strip home.</h1>
+    <p class="hero-sub">A little photobooth for your browser — pick a filter, take a few shots, and walk away with a strip you can print or keep.</p>
+
+    <div class="glass-card setup-card">
+      <div class="preview-container">
+        <!-- ✅ FIXED: Unique ID for preview -->
+        <div id="ar-props-container-preview" class="ar-props-container"></div>
+        <video id="preview-video" autoplay playsinline muted></video>
+        <canvas id="ar-overlay-preview"></canvas>
+      </div>
+      
+      <div class="setup-row">
+        <label class="setup-label">Number of shots</label>
+        <div class="stepper" id="shot-stepper">
+          <button type="button" class="stepper-btn" id="shot-minus" aria-label="Fewer shots">–</button>
+          <span class="stepper-value" id="shot-count">4</span>
+          <button type="button" class="stepper-btn" id="shot-plus" aria-label="More shots">+</button>
+        </div>
+      </div>
+
+      <div class="setup-row setup-row--col">
+        <label class="setup-label">Filter</label>
+        <div class="filter-grid" id="filter-grid">
+          <!-- filled by JS -->
+        </div>
+      </div>
+
+      <div class="setup-row setup-row--col">
+        <label class="setup-label">Countdown timer</label>
+        <div class="timer-grid" id="timer-grid">
+          <button type="button" class="timer-chip active" data-timer="3">3s</button>
+          <button type="button" class="timer-chip" data-timer="5">5s</button>
+          <button type="button" class="timer-chip" data-timer="10">10s</button>
+        </div>
+      </div>
+
+    <div class="setup-row setup-row--col">
+      <label class="setup-label">AR Effects</label>
+      <div class="effects-grid" style="display: flex; gap: 10px; flex-wrap: wrap;">
+        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+          <input type="checkbox" class="effect-toggle" data-effect="noli"> Noli
+        </label>
+        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+          <input type="checkbox" class="effect-toggle" data-effect="sunglasses"> Sunglasses
+        </label>
+        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+          <input type="checkbox" class="effect-toggle" data-effect="hat"> Hat
+        </label>
+        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+          <input type="checkbox" class="effect-toggle" data-effect="hearts"> Hearts
+        </label>
+      </div>
+    </div>
+
+    <button id="magic-props-btn" class="magic-toggle-btn" onclick="toggleMagicProps()">
+      <span class="icon">✨</span>
+      <span class="text">Ambient Magic: OFF</span>
+    </button>
+
+      <button type="button" class="btn-primary" id="btn-start-capture">Start</button>
+      <p class="setup-note" id="camera-error" hidden>We couldn't reach your camera. Check your browser's camera permission and try again.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== SCREEN: CAPTURE ===================== -->
+<section id="screen-capture" class="screen">
+  <div class="capture-wrap">
+    <div class="capture-stage">
+      <!-- ✅ FIXED: Unique ID for capture -->
+      <div id="ar-props-container-capture" class="ar-props-container"></div>
+      <video id="camera-feed" autoplay playsinline muted></video>
+      <canvas id="ar-overlay-capture"></canvas>
+      <canvas id="capture-canvas" hidden></canvas>
+
+      <svg id="aperture" class="aperture" viewBox="0 0 200 200" aria-hidden="true">
+        <g id="aperture-blades"></g>
+      </svg>
+
+      <div class="shot-progress" id="shot-progress"></div>
+    </div>
+
+    <div class="capture-controls">
+      <p class="capture-hint" id="capture-hint">Get ready — shot <span id="current-shot">1</span> of <span id="total-shots">4</span></p>
+      <button type="button" class="btn-secondary" id="btn-cancel-capture">Cancel</button>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== SCREEN: REVIEW ===================== -->
+<section id="screen-review" class="screen">
+  <div class="review-wrap">
+    <p class="eyebrow">review your shots</p>
+    <h2 class="section-title">Happy with these?</h2>
+
+    <div class="glass-card template-card">
+      <label class="setup-label">Strip style</label>
+      <div class="template-grid" id="template-grid">
+        <button type="button" class="template-swatch" data-template="cream" style="--swatch-bg:#FBF6EF;--swatch-accent:#C9A227;"></button>
+        <button type="button" class="template-swatch" data-template="pink" style="--swatch-bg:#F7DCE6;--swatch-accent:#B8547C;"></button>
+        <button type="button" class="template-swatch" data-template="red" style="--swatch-bg:#5E1414;--swatch-accent:#E7B4B4;"></button>
+        <button type="button" class="template-swatch" data-template="black" style="--swatch-bg:#0D0D0D;--swatch-accent:#D4AF37;"></button>
+      </div>
+    </div>
+
+    <div class="review-actions">
+      <button type="button" class="btn-secondary" id="btn-retake-all">Start over</button>
+      <button type="button" class="btn-primary" id="btn-to-export">Build my strip</button>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== SCREEN: EXPORT ===================== -->
+<section id="screen-export" class="screen">
+  <div class="export-wrap">
+    <p class="eyebrow">all done</p>
+    <h2 class="section-title">Your strip is ready</h2>
+
+    <div class="strip-preview-frame">
+      <div class="strip-canvas-wrap">
+        <canvas id="strip-canvas"></canvas>
+        <div id="strip-click-overlay"></div>
+      </div>
+    </div>
+
+    <div class="glass-card sticker-card">
+      <label class="setup-label">Stickers</label>
+      <p class="sticker-hint">Pick one, then tap anywhere on the strip above to place it.</p>
+      <div class="sticker-grid" id="sticker-grid"></div>
+      <p class="sticker-hint">Tap to remove sticker.</p>
+      <div class="placed-stickers-list" id="placed-stickers-list"></div>
+    </div>
+
+    <div class="export-actions">
+      <button type="button" class="btn-primary" id="btn-download-pdf">Download PDF</button>
+      <button type="button" class="btn-secondary" id="btn-print">Print</button>
+      <button type="button" class="btn-ghost" id="btn-start-over">Take new photos</button>
+    </div>
+  </div>
+</section>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/filters.js') }}"></script>
+<script src="{{ url_for('static', filename='js/stickers.js') }}"></script>
+<script src="{{ url_for('static', filename='js/camera.js') }}"></script>
+<script src="{{ url_for('static', filename='js/strip.js') }}"></script>
+<script src="{{ url_for('static', filename='js/export.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ar-effects.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai-props.js') }}"></script>
+
+</body>
+</html>
