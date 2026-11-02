@@ -4,14 +4,23 @@ import re
 import secrets
 import threading
 import time
+import uuid
 
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO, close_room, disconnect, emit
 from flask_socketio import join_room as sio_join_room
 from flask_socketio import leave_room as sio_leave_room
+from werkzeug.utils import secure_filename
+from dotenv import load_dotenv
 
+# 1. Load environment variables from the .env file FIRST
+load_dotenv()
+
+# 2. Initialize the Flask app
 app = Flask(__name__)
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
+
+# 3. Set the Secret Key securely (uses .env if available, otherwise generates a safe random one for local dev)
+app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 
 # Debug mode is OFF unless you turn it on. Never leave it on while ngrok is open:
 # the debugger would be reachable by anyone who has your link.
@@ -62,7 +71,6 @@ sid_to_room = {}    # socket id -> room code
 failed_joins = {}   # socket id -> number of wrong codes
 lock = threading.RLock()
 _cleanup_started = False
-
 
 # ----------------------------------------------------------------- helpers
 def clean_name(raw, fallback="Guest"):
