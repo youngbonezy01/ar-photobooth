@@ -1,0 +1,86 @@
+/* room.css — styles for the booth lobby, waiting screen and booth mode */
+
+.lobby-chip-grid{ display:flex; gap:10px; }
+.lobby-chip{
+  flex:1;
+  border:1px solid var(--glass-border);
+  background: rgba(255,255,255,0.55);
+  border-radius: var(--radius-sm);
+  padding: 12px 8px;
+  font-size:0.85rem;
+  font-weight:700;
+  color: var(--ink-soft);
+  transition: all .15s ease;
+}
+.lobby-chip.active{
+  background: var(--rose);
+  color:#fff;
+  border-color: var(--rose);
+}
+.lobby-chip:disabled{ cursor:default; }
+.lobby-chip:disabled:not(.active){ opacity:0.5; }
+
+.lobby-swatch-grid{ display:flex; gap:12px; flex-wrap:wrap; }
+.lobby-swatch{
+  flex:1;
+  min-width:64px;
+  height:64px;
+  position:relative;
+  border-radius: var(--radius-sm);
+  border: 2px solid transparent;
+  background: var(--swatch-bg);
+  box-shadow: inset 0 0 0 1px rgba(43,35,32,0.12);
+  transition: transform .15s ease;
+}
+.lobby-swatch::before{
+  content:"";
+  position:absolute; top:50%; left:50%;
+  transform:translate(-50%, -50%);
+  width:22px; height:22px; border-radius:50%;
+  background: var(--swatch-accent);
+}
+.lobby-swatch.active{ border-color: var(--swatch-accent); transform: translateY(-3px); }
+.lobby-swatch:disabled{ cursor:default; }
+.lobby-swatch:disabled:not(.active){ opacity:0.5; }
+
+.lobby-note{
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+
+.lobby-status{
+  min-height: 1.4em;
+  margin: 0 0 14px;
+  font-weight: 800;
+  color: var(--berry);
+  text-align: center;
+}
+
+.lobby-actions{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+
+/* ============ WAITING SCREEN (after your shots, before everyone is done) ============ */
+.waiting-count{
+  margin: 0 0 14px;
+  font-family: var(--font-display);
+  font-size: 1.4rem;
+  text-align: center;
+}
+.badge--done{ background: #D9F0DF; color: #1F6B36; }
+.badge--wait{ background: rgba(43,35,32,0.08); color: var(--ink-soft); }
+
+/* ============ CAPTURE SCREEN: who are we waiting for? ============ */
+.booth-wait-note{
+  margin: -6px 0 14px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--berry);
+}
+
+/* ============ BOOTH MODE ============ */
+/* Photos are already shared with the group, so single-shot retakes are off */
+body.in-booth .shot-thumb button{ display:none; }

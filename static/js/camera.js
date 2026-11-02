@@ -5,11 +5,27 @@ const previewVideo = document.getElementById("preview-video");
 const captureCanvas = document.getElementById("capture-canvas");
 
 let mediaStream = null;
-let capturedShots = [];   // dataURLs, in order, filter already baked in
-let totalShots = 4;
-let currentShotIndex = 0;
-let selectedTimerSeconds = 3;
 let irisHole, flashRect;
+
+// Every capture (a full set, or one retake) takes a run number. cancelCapture()
+// bumps the number, so a countdown that is still running notices it has been
+// replaced or cancelled and stops, instead of snapping a photo later.
+let captureRunId = 0;
+function startCaptureRun() { return ++captureRunId; }
+function cancelCapture() { captureRunId++; }
+
+// If Ambient Magic is switched ON (its state lives in ai-props.js), restart the
+// scene detection on whichever video is now showing.
+function resumeMagicProps(videoElement) {
+  try {
+    if (isMagicPropsEnabled) {
+      currentMood = "";                 // force props to respawn on the next scan
+      startSceneDetection(videoElement);
+    }
+  } catch (e) {
+    // ai-props.js not ready yet, safe to ignore
+  }
+}
 
 // 👇 Start the preview on page load
 async function startPreviewCamera() {
@@ -23,9 +39,11 @@ async function startPreviewCamera() {
     if (previewVideo) {
       previewVideo.srcObject = mediaStream;
       applyLiveFilter();
-      
+
       const previewCanvas = document.getElementById("ar-overlay-preview");
       if (previewCanvas) startARLoop(previewVideo, previewCanvas);
+
+      resumeMagicProps(previewVideo);
     }
     document.getElementById("camera-error").hidden = true;
   } catch (err) {
@@ -46,11 +64,13 @@ async function startCamera() {
       });
     }
     video.srcObject = mediaStream;
-    applyLiveFilter(); 
-    
+    applyLiveFilter();
+
     const captureCanvasAR = document.getElementById("ar-overlay-capture");
     if (captureCanvasAR) startARLoop(video, captureCanvasAR);
-    
+
+    resumeMagicProps(video);
+
     document.getElementById("camera-error").hidden = true;
     return true;
   } catch (err) {
@@ -60,6 +80,8 @@ async function startCamera() {
 }
 
 function stopCamera() {
+  // Stop the AR loop FIRST so it isn't left running on a dead stream
+  stopARLoop();
   if (mediaStream) {
     mediaStream.getTracks().forEach((t) => t.stop());
     mediaStream = null;
@@ -69,7 +91,7 @@ function stopCamera() {
 
 // 👇 Apply filter to BOTH the preview and the capture video
 function applyLiveFilter() {
-  const filterCss = getFilterById(activeFilterId).css;
+  const filterCss = getFilterById(state.filterId).css;
   if (video) video.style.filter = filterCss;
   if (previewVideo) previewVideo.style.filter = filterCss;
 }
@@ -82,7 +104,7 @@ document.getElementById('filter-grid').addEventListener('click', () => {
 function buildShotProgressDots() {
   const wrap = document.getElementById("shot-progress");
   wrap.innerHTML = "";
-  for (let i = 0; i < totalShots; i++) {
+  for (let i = 0; i < state.totalShots; i++) {
     const d = document.createElement("span");
     d.className = "dot";
     wrap.appendChild(d);
@@ -94,8 +116,8 @@ function updateShotProgressDots() {
   const dots = document.querySelectorAll("#shot-progress .dot");
   dots.forEach((d, i) => {
     d.classList.remove("done", "current");
-    if (i < currentShotIndex) d.classList.add("done");
-    else if (i === currentShotIndex) d.classList.add("current");
+    if (i < state.currentShotIndex) d.classList.add("done");
+    else if (i === state.currentShotIndex) d.classList.add("current");
   });
 }
 
@@ -193,6 +215,7 @@ function flashShutter() {
   });
 }
 
+// Grabs ONE frame from the camera (filter + AR baked in).
 function captureFrame() {
   const w = video.videoWidth || 960;
   const h = video.videoHeight || 720;
@@ -201,9 +224,9 @@ function captureFrame() {
   const ctx = captureCanvas.getContext("2d");
 
   ctx.save();
-  ctx.filter = getFilterById(activeFilterId).css;
+  ctx.filter = getFilterById(state.filterId).css;
   ctx.translate(w, 0);
-  ctx.scale(-1, 1); 
+  ctx.scale(-1, 1);
 
   ctx.drawImage(video, 0, 0, w, h);
 
@@ -217,12 +240,14 @@ function captureFrame() {
   return captureCanvas.toDataURL("image/jpeg", 0.92);
 }
 
-async function runCountdownAndCapture() {
+// Runs one countdown and snaps one photo. Returns the photo, or null if this
+// run was cancelled (Cancel pressed, booth left) before the photo was taken.
+async function runCountdownAndCapture(runId) {
   setIrisRadius(150, 10);
   setCountdownText("");
 
   const steps = [];
-  for (let s = selectedTimerSeconds; s >= 1; s--) steps.push(s);
+  for (let s = state.timerSeconds; s >= 1; s--) steps.push(s);
 
   for (let i = 0; i < steps.length; i++) {
     const n = steps[i];
@@ -231,182 +256,42 @@ async function runCountdownAndCapture() {
     const r = Math.max(150 - progress * 138, 12);
     setIrisRadius(r, 900);
     await wait(1000);
+    if (runId !== captureRunId) return null;
   }
 
   setCountdownText("");
   setIrisRadius(4, 120);
   await wait(120);
+  if (runId !== captureRunId) return null;
+
   const dataUrl = captureFrame();
   await flashShutter();
   setIrisRadius(150, 10);
   return dataUrl;
 }
 
+// Takes the whole set of shots. Returns true when finished, false if cancelled.
 async function runShotSequence() {
-  capturedShots = [];
-  currentShotIndex = 0;
-  document.getElementById("total-shots").textContent = totalShots;
+  const runId = startCaptureRun();
+  me().shots = [];
+  state.currentShotIndex = 0;
+  document.getElementById("total-shots").textContent = state.totalShots;
   buildShotProgressDots();
   applyLiveFilter();
 
-  for (let i = 0; i < totalShots; i++) {
-    currentShotIndex = i;
+  for (let i = 0; i < state.totalShots; i++) {
+    state.currentShotIndex = i;
     document.getElementById("current-shot").textContent = i + 1;
     updateShotProgressDots();
-    const shot = await runCountdownAndCapture();
-    capturedShots.push(shot);
+
+    const shot = await runCountdownAndCapture(runId);
+    if (shot === null) return false;
+    me().shots.push(shot);
+
     await wait(400);
+    if (runId !== captureRunId) return false;
   }
-  currentShotIndex = totalShots;
+  state.currentShotIndex = state.totalShots;
   updateShotProgressDots();
-}
-
-
-/* ==========================================
-   AI SCENE DETECTION & PROPS (CLEANED UP)
-   ========================================== */
-
-// 1. Setup the hidden canvas for analyzing the video
-const analysisCanvas = document.createElement('canvas');
-const analysisCtx = analysisCanvas.getContext('2d', { willReadFrequently: true });
-analysisCanvas.width = 64;
-analysisCanvas.height = 48;
-
-// 2. Define our "Moods" and their matching props
-const moodProps = {
-  party: ['🎈', '🎉', '✨', '🦋', '🌟', '🎊', '🍾'],
-  night: ['✨', '🌙', '⭐', '🦇', '', '💫'],
-  romantic: ['', '🌹', '💕', '🦢', '', '💌'],
-  nature: ['🍃', '🌸', '🌻', '🦋', '', '🍄'],
-  default: ['✨', '🌟', '', '⭐']
-};
-
-let currentMood = 'default';
-let analysisInterval;
-let isMagicPropsEnabled = false;
-
-// 3. The "AI" Scene Analyzer
-function analyzeScene(videoElement) {
-  if (!videoElement || videoElement.readyState !== videoElement.HAVE_ENOUGH_DATA) return;
-  
-  try {
-    analysisCtx.drawImage(videoElement, 0, 0, analysisCanvas.width, analysisCanvas.height);
-  } catch (e) { return; }
-  
-  const imageData = analysisCtx.getImageData(0, 0, analysisCanvas.width, analysisCanvas.height);
-  const data = imageData.data;
-  
-  let totalBrightness = 0, totalRed = 0, totalGreen = 0, totalBlue = 0;
-  let pixelCount = data.length / 4;
-
-  for (let i = 0; i < data.length; i += 16) {
-    const r = data[i], g = data[i + 1], b = data[i + 2];
-    totalBrightness += (r * 0.299 + g * 0.587 + b * 0.114);
-    totalRed += r; totalGreen += g; totalBlue += b;
-  }
-
-  const avgBrightness = totalBrightness / pixelCount;
-  const avgRed = totalRed / pixelCount;
-  const avgGreen = totalGreen / pixelCount;
-  const avgBlue = totalBlue / pixelCount;
-
-  let detectedMood = 'default';
-  if (avgBrightness < 60) detectedMood = 'night';
-  else if (avgRed > avgBlue + 20 && avgRed > avgGreen + 10) detectedMood = 'romantic';
-  else if (avgGreen > avgRed && avgGreen > avgBlue) detectedMood = 'nature';
-  else if (avgBrightness > 120) detectedMood = 'party';
-
-  if (detectedMood !== currentMood) {
-    currentMood = detectedMood;
-    updateProps();
-  }
-}
-
-// 4. Function to spawn the props
-function updateProps() {
-  const previewContainer = document.getElementById('ar-props-container-preview');
-  const captureContainer = document.getElementById('ar-props-container-capture');
-  
-  if (previewContainer) previewContainer.innerHTML = '';
-  if (captureContainer) captureContainer.innerHTML = '';
-  
-  const screenStart = document.getElementById('screen-start');
-  const screenCapture = document.getElementById('screen-capture');
-  
-  let activeContainer = null;
-  if (screenStart && screenStart.classList.contains('active')) activeContainer = previewContainer;
-  else if (screenCapture && screenCapture.classList.contains('active')) activeContainer = captureContainer;
-  
-  if (!activeContainer) return;
-  
-  const propsToUse = moodProps[currentMood] || moodProps.default;
-  for (let i = 0; i < 8; i++) createProp(activeContainer, propsToUse);
-}
-
-function createProp(container, propsList) {
-  if (!container) return;
-  const prop = document.createElement('div');
-  prop.classList.add('floating-prop');
-  prop.textContent = propsList[Math.floor(Math.random() * propsList.length)] || '✨';
-  
-  const side = Math.random();
-  let leftPos, topPos;
-  if (side < 0.25) { leftPos = Math.random() * 15; topPos = 10 + Math.random() * 80; }
-  else if (side < 0.5) { leftPos = 85 + Math.random() * 15; topPos = 10 + Math.random() * 80; }
-  else if (side < 0.75) { leftPos = Math.random() * 100; topPos = Math.random() * 15; }
-  else { leftPos = Math.random() * 100; topPos = 85 + Math.random() * 15; }
-
-  prop.style.left = `${leftPos}%`;
-  prop.style.top = `${topPos}%`;
-  prop.style.fontSize = `${0.8 + Math.random() * 0.8}rem`;
-  prop.style.animationDuration = `${8 + Math.random() * 5}s`;
-  prop.style.animationDelay = `${Math.random() * 3}s`;
-  
-  container.appendChild(prop);
-}
-
-// 5. Start/Stop Controls
-function startSceneDetection(videoElement) {
-  if (!videoElement) return;
-  if (analysisInterval) clearInterval(analysisInterval);
-  
-  analysisInterval = setInterval(() => {
-    if (isMagicPropsEnabled && videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
-      analyzeScene(videoElement);
-    }
-  }, 1000);
-}
-
-function stopSceneDetection() {
-  if (analysisInterval) clearInterval(analysisInterval);
-  const pc = document.getElementById('ar-props-container-preview');
-  const cc = document.getElementById('ar-props-container-capture');
-  if (pc) pc.innerHTML = '';
-  if (cc) cc.innerHTML = '';
-}
-
-// 6. Toggle Button Function
-function toggleMagicProps() {
-  isMagicPropsEnabled = !isMagicPropsEnabled;
-  const btn = document.getElementById('magic-props-btn');
-  if (!btn) return;
-  
-  const textSpan = btn.querySelector('.text');
-  
-  if (isMagicPropsEnabled) {
-    btn.classList.add('active');
-    if (textSpan) textSpan.textContent = 'Ambient Magic: ON';
-    
-    const pv = document.getElementById('preview-video');
-    const cf = document.getElementById('camera-feed');
-    const ss = document.getElementById('screen-start');
-    const sc = document.getElementById('screen-capture');
-    
-    if (ss && ss.classList.contains('active') && pv) startSceneDetection(pv);
-    else if (sc && sc.classList.contains('active') && cf) startSceneDetection(cf);
-  } else {
-    btn.classList.remove('active');
-    if (textSpan) textSpan.textContent = 'Ambient Magic: OFF';
-    stopSceneDetection();
-  }
+  return true;
 }

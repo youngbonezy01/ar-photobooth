@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Socket test (dev only)</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 24px auto; padding: 0 16px; }
+  input, button { font-size: 1rem; padding: 8px; margin: 4px 4px 4px 0; }
+  pre { background: #111; color: #9f9; padding: 12px; border-radius: 8px; min-height: 240px; white-space: pre-wrap; overflow: auto; }
+</style>
+</head>
+<body>
+<h2>Socket test (dev only)</h2>
+<p>Open this page in two tabs. Create a booth in one, join it from the other.</p>
+
+<div>
+  <input id="name" placeholder="Your name" maxlength="14">
+  <button id="create">Create booth</button>
+</div>
+<div>
+  <input id="code" placeholder="Code, e.g. K7QM-4X9P" maxlength="12">
+  <button id="join">Join booth</button>
+  <button id="leave">Leave</button>
+</div>
+
+<pre id="log"></pre>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.1/socket.io.min.js"></script>
+<script>
+  const logEl = document.getElementById("log");
+  const socket = io();
+
+  function show(label, data) {
+    logEl.textContent += label + " " + (data === undefined ? "" : JSON.stringify(data)) + "\n";
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  ["connect", "disconnect", "joined", "left", "room_update", "room_error", "room_closed"].forEach((evt) => {
+    socket.on(evt, (data) => show("<- " + evt, data));
+  });
+
+  document.getElementById("create").onclick = () => {
+    const payload = { name: document.getElementById("name").value };
+    show("-> create_room", payload);
+    socket.emit("create_room", payload);
+  };
+  document.getElementById("join").onclick = () => {
+    const payload = {
+      name: document.getElementById("name").value,
+      code: document.getElementById("code").value,
+    };
+    show("-> join_room", payload);
+    socket.emit("join_room", payload);
+  };
+  document.getElementById("leave").onclick = () => {
+    show("-> leave_room");
+    socket.emit("leave_room");
+  };
+</script>
+</body>
+</html>

@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,500&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/room.css') }}">
 
 </head>
 <body>
@@ -22,12 +23,11 @@
 
     <div class="glass-card setup-card">
       <div class="preview-container">
-        <!-- ✅ FIXED: Unique ID for preview -->
         <div id="ar-props-container-preview" class="ar-props-container"></div>
         <video id="preview-video" autoplay playsinline muted></video>
         <canvas id="ar-overlay-preview"></canvas>
       </div>
-      
+
       <div class="setup-row">
         <label class="setup-label">Number of shots</label>
         <div class="stepper" id="shot-stepper">
@@ -53,31 +53,134 @@
         </div>
       </div>
 
-    <div class="setup-row setup-row--col">
-      <label class="setup-label">AR Effects</label>
-      <div class="effects-grid" style="display: flex; gap: 10px; flex-wrap: wrap;">
-        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-          <input type="checkbox" class="effect-toggle" data-effect="noli"> Noli
-        </label>
-        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-          <input type="checkbox" class="effect-toggle" data-effect="sunglasses"> Sunglasses
-        </label>
-        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-          <input type="checkbox" class="effect-toggle" data-effect="hat"> Hat
-        </label>
-        <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
-          <input type="checkbox" class="effect-toggle" data-effect="hearts"> Hearts
-        </label>
+      <div class="setup-row setup-row--col">
+        <label class="setup-label">AR Effects</label>
+        <div class="effects-grid" style="display: flex; gap: 10px; flex-wrap: wrap;">
+          <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+            <input type="checkbox" class="effect-toggle" data-effect="noli"> Noli
+          </label>
+          <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+            <input type="checkbox" class="effect-toggle" data-effect="sunglasses"> Sunglasses
+          </label>
+          <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+            <input type="checkbox" class="effect-toggle" data-effect="hat"> Hat
+          </label>
+          <label style="display: flex; align-items: center; gap: 5px; cursor: pointer;">
+            <input type="checkbox" class="effect-toggle" data-effect="hearts"> Hearts
+          </label>
+        </div>
       </div>
-    </div>
 
-    <button id="magic-props-btn" class="magic-toggle-btn" onclick="toggleMagicProps()">
-      <span class="icon">✨</span>
-      <span class="text">Ambient Magic: OFF</span>
-    </button>
+      <button id="magic-props-btn" class="magic-toggle-btn" onclick="toggleMagicProps()">
+        <span class="icon">✨</span>
+        <span class="text">Ambient Magic: OFF</span>
+      </button>
 
       <button type="button" class="btn-primary" id="btn-start-capture">Start</button>
       <p class="setup-note" id="camera-error" hidden>We couldn't reach your camera. Check your browser's camera permission and try again.</p>
+    </div>
+
+    <!-- booth with friends -->
+    <div class="glass-card friends-card">
+      <h2 class="friends-title">Booth with friends</h2>
+      <p class="friends-sub">Make a booth and share the code, or join one. Up to 6 people, one strip each.</p>
+
+      <input type="text" class="text-input" id="player-name" placeholder="Your name" maxlength="14" autocomplete="off">
+
+      <button type="button" class="btn-primary" id="btn-create-booth">Create booth</button>
+
+      <div class="divider-or">or join one</div>
+
+      <div class="join-row">
+        <input type="text" class="text-input code-input" id="join-code" placeholder="K7QM-4X9P" maxlength="9" autocomplete="off" spellcheck="false">
+        <button type="button" class="btn-secondary" id="btn-join-booth">Join</button>
+      </div>
+
+      <p class="room-error" id="room-error" hidden></p>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== SCREEN: LOBBY (waiting room) ===================== -->
+<section id="screen-lobby" class="screen">
+  <div class="lobby-wrap">
+    <p class="eyebrow">your booth</p>
+    <h2 class="section-title">Waiting for friends</h2>
+
+    <div class="glass-card lobby-card">
+      <label class="setup-label">Booth code</label>
+      <div class="code-display" id="lobby-code">----</div>
+      <div class="code-actions">
+        <button type="button" class="btn-secondary" id="btn-copy-code">Copy code</button>
+        <button type="button" class="btn-secondary" id="btn-copy-link">Copy invite link</button>
+      </div>
+    </div>
+
+    <div class="glass-card lobby-card">
+      <label class="setup-label">In the booth <span class="people-count" id="people-count"></span></label>
+      <ul class="member-list" id="member-list"></ul>
+    </div>
+
+    <!-- host settings (guests see the same values, read-only) -->
+    <div class="glass-card lobby-card" id="lobby-settings">
+      <label class="setup-label">Booth settings</label>
+
+      <div class="setup-row">
+        <label class="setup-label">Number of shots</label>
+        <div class="stepper">
+          <button type="button" class="stepper-btn" id="lobby-shot-minus" aria-label="Fewer shots">–</button>
+          <span class="stepper-value" id="lobby-shot-count">4</span>
+          <button type="button" class="stepper-btn" id="lobby-shot-plus" aria-label="More shots">+</button>
+        </div>
+      </div>
+
+      <div class="setup-row setup-row--col">
+        <label class="setup-label">Countdown timer</label>
+        <div class="lobby-chip-grid" id="lobby-timer-grid">
+          <button type="button" class="lobby-chip" data-timer="3">3s</button>
+          <button type="button" class="lobby-chip" data-timer="5">5s</button>
+          <button type="button" class="lobby-chip" data-timer="10">10s</button>
+        </div>
+      </div>
+
+      <div class="setup-row setup-row--col">
+        <label class="setup-label">Strip style</label>
+        <div class="lobby-swatch-grid" id="lobby-template-grid">
+          <button type="button" class="lobby-swatch" data-template="cream" aria-label="Cream" style="--swatch-bg:#FBF6EF;--swatch-accent:#C9A227;"></button>
+          <button type="button" class="lobby-swatch" data-template="pink" aria-label="Pink" style="--swatch-bg:#F7DCE6;--swatch-accent:#B8547C;"></button>
+          <button type="button" class="lobby-swatch" data-template="red" aria-label="Red" style="--swatch-bg:#5E1414;--swatch-accent:#E7B4B4;"></button>
+          <button type="button" class="lobby-swatch" data-template="black" aria-label="Black" style="--swatch-bg:#0D0D0D;--swatch-accent:#D4AF37;"></button>
+        </div>
+      </div>
+
+      <p class="lobby-note" id="lobby-note"></p>
+    </div>
+
+    <p class="room-error" id="lobby-error" hidden></p>
+    <p class="lobby-status" id="lobby-status"></p>
+
+    <div class="lobby-actions">
+      <button type="button" class="btn-primary" id="btn-start-booth" hidden>Start booth</button>
+      <button type="button" class="btn-secondary" id="btn-leave-booth">Leave booth</button>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== SCREEN: WAITING (shots taken, others still shooting) ===================== -->
+<section id="screen-waiting" class="screen">
+  <div class="lobby-wrap">
+    <p class="eyebrow">nice shots</p>
+    <h2 class="section-title">Waiting for everyone…</h2>
+
+    <div class="glass-card lobby-card">
+      <p class="waiting-count" id="waiting-count">0 of 0 finished</p>
+      <ul class="member-list" id="waiting-list"></ul>
+    </div>
+
+    <p class="room-error" id="waiting-error" hidden></p>
+
+    <div class="lobby-actions">
+      <button type="button" class="btn-secondary" id="btn-leave-waiting">Leave booth</button>
     </div>
   </div>
 </section>
@@ -86,7 +189,6 @@
 <section id="screen-capture" class="screen">
   <div class="capture-wrap">
     <div class="capture-stage">
-      <!-- ✅ FIXED: Unique ID for capture -->
       <div id="ar-props-container-capture" class="ar-props-container"></div>
       <video id="camera-feed" autoplay playsinline muted></video>
       <canvas id="ar-overlay-capture"></canvas>
@@ -111,6 +213,8 @@
   <div class="review-wrap">
     <p class="eyebrow">review your shots</p>
     <h2 class="section-title">Happy with these?</h2>
+
+    <div class="shots-strip" id="shots-strip"></div>
 
     <div class="glass-card template-card">
       <label class="setup-label">Strip style</label>
@@ -151,14 +255,15 @@
     </div>
 
     <div class="export-actions">
-      <button type="button" class="btn-primary" id="btn-download-pdf">Download PDF</button>
+      <button type="button" class="btn-primary" id="btn-download-image">Download Image</button>
       <button type="button" class="btn-secondary" id="btn-print">Print</button>
       <button type="button" class="btn-ghost" id="btn-start-over">Take new photos</button>
     </div>
   </div>
 </section>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.8.1/socket.io.min.js"></script>
+<script src="{{ url_for('static', filename='js/state.js') }}"></script>
 <script src="{{ url_for('static', filename='js/filters.js') }}"></script>
 <script src="{{ url_for('static', filename='js/stickers.js') }}"></script>
 <script src="{{ url_for('static', filename='js/camera.js') }}"></script>
@@ -166,6 +271,7 @@
 <script src="{{ url_for('static', filename='js/export.js') }}"></script>
 <script src="{{ url_for('static', filename='js/ar-effects.js') }}"></script>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/room.js') }}"></script>
 <script src="{{ url_for('static', filename='js/ai-props.js') }}"></script>
 
 </body>

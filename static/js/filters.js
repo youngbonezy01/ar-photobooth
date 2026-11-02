@@ -16,8 +16,6 @@ const FILTERS = [
   { id: "dreamy",    label: "Dreamy",       css: "brightness(1.12) saturate(1.15) contrast(0.9) blur(0.5px)" },
 ];
 
-let activeFilterId = "original";
-
 function getFilterById(id) {
   return FILTERS.find(f => f.id === id) || FILTERS[0];
 }
@@ -25,14 +23,14 @@ function getFilterById(id) {
 function buildFilterGrid() {
   const grid = document.getElementById("filter-grid");
   grid.innerHTML = "";
-  FILTERS.forEach((f, i) => {
+  FILTERS.forEach((f) => {
     const chip = document.createElement("button");
     chip.type = "button";
-    chip.className = "filter-chip" + (f.id === activeFilterId ? " active" : "");
+    chip.className = "filter-chip" + (f.id === state.filterId ? " active" : "");
     chip.textContent = f.label;
     chip.dataset.filterId = f.id;
     chip.addEventListener("click", () => {
-      activeFilterId = f.id;
+      state.filterId = f.id;
       [...grid.children].forEach(c => c.classList.remove("active"));
       chip.classList.add("active");
     });
