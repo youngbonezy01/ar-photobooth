@@ -5,13 +5,22 @@ import secrets
 import threading
 import time
 import uuid
+import io
+import base64
 
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, close_room, disconnect, emit
 from flask_socketio import join_room as sio_join_room
 from flask_socketio import leave_room as sio_leave_room
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
+from PIL import Image
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
+from pyngrok import ngrok
 
 # 1. Load environment variables from the .env file FIRST
 load_dotenv()
@@ -19,63 +28,59 @@ load_dotenv()
 # 2. Initialize the Flask app
 app = Flask(__name__)
 
-# 3. Set the Secret Key securely (uses .env if available, otherwise generates a safe random one for local dev)
+# 3. Set the Secret Key securely
 app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 
-# Debug mode is OFF unless you turn it on. Never leave it on while ngrok is open:
-# the debugger would be reachable by anyone who has your link.
-#   Debug on (local work only):   $env:PHOTOBOOTH_DEBUG="1"; python app.py
+# 4. Initialize Flask-Limiter (rate limiting for HTTP routes)
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,  # Limits based on IP address
+    default_limits=["200 per day", "50 per hour"]  # Global safety net
+)
+
+# Debug mode is OFF unless you turn it on
 DEBUG = os.environ.get("PHOTOBOOTH_DEBUG") == "1"
 
-# "threading" mode works on Windows without extra setup. simple-websocket gives
-# real WebSockets; without it Socket.IO falls back to slower long-polling.
-# max_http_buffer_size is the biggest single message allowed. One person's
-# photos (up to 6 shrunken JPEGs) are well under 1 MB.
+# SocketIO setup
 socketio = SocketIO(app, async_mode="threading", max_http_buffer_size=1_000_000)
 
 # ---------------------------------------------------------------- settings
 MAX_PEOPLE = 6
 MAX_ROOMS = 200
-ROOM_TTL_SECONDS = 60 * 60      # close rooms after an hour of no activity
-NAME_MAX = 14                   # matches what the strip renderer prints
-MAX_FAILED_JOINS = 8            # wrong codes allowed per connection
+ROOM_TTL_SECONDS = 60 * 60
+NAME_MAX = 14
+MAX_FAILED_JOINS = 8
 
-# What the host is allowed to choose (the server never trusts the browser)
 MIN_SHOTS = 3
 MAX_SHOTS = 6
 ALLOWED_TIMERS = (3, 5, 10)
 ALLOWED_TEMPLATES = ("cream", "pink", "red", "black")
-START_DELAY_SECONDS = 3         # "Starting in 3…" so every device begins together
-READY_TIMEOUT_SECONDS = 25      # how long to wait for every camera to open
+START_DELAY_SECONDS = 3
+READY_TIMEOUT_SECONDS = 25
 
-# Stickers: the ids must match STICKERS in static/js/stickers.js
 STICKER_IDS = ("heart", "sparkle", "star", "flower", "bow", "cherry", "cloud", "cake")
 MAX_STICKERS = 60
 
-# Uploaded photos must be small JPEG data URLs (JPEG files start with /9j/)
 SHOT_HEADER = "data:image/jpeg;base64,"
 SHOT_MAGIC = SHOT_HEADER + "/9j/"
 MAX_SHOT_CHARS = 120_000
 BASE64_BODY = re.compile(r"[A-Za-z0-9+/=]+")
 
-# No 0/O, 1/I/L so codes are easy to read out loud
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
 DEFAULT_SETTINGS = {"totalShots": 4, "timerSeconds": 3, "template": "cream"}
 
 # ------------------------------------------------------------------ memory
-# Everything lives in server memory: nothing is written to disk, and it all
-# disappears when the server restarts or a room closes.
-rooms = {}          # code -> room dict
-sid_to_room = {}    # socket id -> room code
-failed_joins = {}   # socket id -> number of wrong codes
+rooms = {}
+sid_to_room = {}
+failed_joins = {}
 lock = threading.RLock()
 _cleanup_started = False
 
 # ----------------------------------------------------------------- helpers
 def clean_name(raw, fallback="Guest"):
     name = str(raw or "")
-    name = re.sub(r"[\x00-\x1f\x7f]", "", name)   # strip control characters
+    name = re.sub(r"[\x00-\x1f\x7f]", "", name)
     name = re.sub(r"\s+", " ", name).strip()[:NAME_MAX]
     return name or fallback
 
@@ -109,12 +114,10 @@ def new_code():
 
 
 def is_int(value):
-    # bool is a kind of int in Python, so True/False must be rejected explicitly
     return isinstance(value, int) and not isinstance(value, bool)
 
 
 def valid_unit(value):
-    """A real number from 0 to 1 (a position on the sheet)."""
     return (
         isinstance(value, (int, float))
         and not isinstance(value, bool)
@@ -133,7 +136,6 @@ def is_host(room, sid):
 
 
 def valid_shots(shots, expected):
-    """Exactly `expected` small JPEG data URLs, nothing else."""
     if not isinstance(shots, list) or len(shots) != expected:
         return False
     for s in shots:
@@ -147,15 +149,14 @@ def valid_shots(shots, expected):
 
 
 def public_room(room):
-    """The only shape of a room that is ever sent to browsers."""
     return {
         "code": room["code"],
         "hostId": room["hostId"],
         "started": room["started"],
         "settings": room["settings"],
         "members": [{"id": m["id"], "name": m["name"]} for m in room["members"].values()],
-        "readyIds": list(room["ready"]),               # whose camera is open
-        "doneIds": list(room["submissions"].keys()),   # who has uploaded their photos
+        "readyIds": list(room["ready"]),
+        "doneIds": list(room["submissions"].keys()),
     }
 
 
@@ -171,28 +172,24 @@ def send_stickers(room):
 
 # ----------------------------------------------- capture rounds + the sheet
 def begin_capture(room):
-    """Everyone's camera is up (or we ran out of patience): tell them to shoot."""
     if room["begun"] or room["sheetSent"]:
         return
     room["begun"] = True
     room["lastActive"] = time.time()
     socketio.emit("begin_capture", {}, to=room["code"])
 
-    # Time limit for collecting photos: every shot's timer, plus slack
     s = room["settings"]
     seconds = s["totalShots"] * (s["timerSeconds"] + 3) + 30
     socketio.start_background_task(deadline_task, room, "collect", seconds)
 
 
 def finalize_sheet(room):
-    """Sends everyone's photos to the whole room, one person per message."""
     if room["sheetSent"]:
         return
     room["sheetSent"] = True
     room["lastActive"] = time.time()
     code = room["code"]
 
-    # Roster order = join order. Anyone who never uploaded is left out.
     people = [
         {"id": i, "name": room["submissions"][i]["name"], "shots": room["submissions"][i]["shots"]}
         for i in room["roster"]
@@ -204,7 +201,6 @@ def finalize_sheet(room):
 
 
 def maybe_advance(room):
-    """Moves the booth forward as soon as everyone still here has caught up."""
     if not room["started"] or room["sheetSent"]:
         return
     member_ids = [m["id"] for m in room["members"].values()]
@@ -222,7 +218,7 @@ def deadline_task(room, kind, seconds):
     socketio.sleep(seconds)
     with lock:
         if rooms.get(room["code"]) is not room:
-            return                      # room closed in the meantime
+            return
         if kind == "ready" and room["started"] and not room["begun"]:
             begin_capture(room)
         elif kind == "collect" and room["begun"] and not room["sheetSent"]:
@@ -230,7 +226,6 @@ def deadline_task(room, kind, seconds):
 
 
 def remove_member(sid):
-    """Takes a socket out of its room. Hands over host, or closes an empty room."""
     with lock:
         code = sid_to_room.pop(sid, None)
         room = rooms.get(code)
@@ -247,7 +242,7 @@ def remove_member(sid):
         if member and room["hostId"] == member["id"]:
             room["hostId"] = next(iter(room["members"].values()))["id"]
         broadcast(room)
-        maybe_advance(room)             # the person who left may have been the last one we waited for
+        maybe_advance(room)
 
 
 def cleanup_loop():
@@ -276,12 +271,13 @@ def index():
 
 @app.after_request
 def revalidate_files(response):
-    # Ask browsers to re-check the page and our JS/CSS every time, so a phone
-    # can never get stuck running an old copy of the code.
-    if request.path == "/" or request.path.startswith("/static/"):
-        response.headers["Cache-Control"] = "no-cache"
+    # Only force re-validation for the main HTML page
+    if request.path == "/":
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    # Let the browser cache static files (CSS/JS/Images) for 1 hour
+    elif request.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "public, max-age=3600"
     return response
-
 
 # ------------------------------------------------------------ socket events
 @socketio.on("connect")
@@ -304,9 +300,19 @@ def on_disconnect():
 def on_create_room(data=None):
     data = data if isinstance(data, dict) else {}
     sid = request.sid
+    
+    # RATE LIMIT: Only allow 1 room creation per 60 seconds per socket
+    with lock:
+        now = time.time()
+        last_create = failed_joins.get(f"{sid}_last_create", 0)
+        if now - last_create < 60:
+            room_error("Please wait before creating another room.")
+            return
+        failed_joins[f"{sid}_last_create"] = now
+    
     with lock:
         if sid in sid_to_room:
-            remove_member(sid)          # leave any room we were already in
+            remove_member(sid)
         if len(rooms) >= MAX_ROOMS:
             room_error("The booths are all busy right now. Try again in a bit.")
             return
@@ -321,13 +327,12 @@ def on_create_room(data=None):
             "members": {sid: member},
             "createdAt": time.time(),
             "lastActive": time.time(),
-            # filled in when the host presses Start
-            "begun": False,             # shooting has begun
-            "sheetSent": False,         # the finished sheet has gone out
-            "roster": [],               # member ids at the moment of Start, in order
-            "ready": set(),             # member ids whose camera is open
-            "submissions": {},          # member id -> {"name", "shots"}
-            "stickers": [],             # shared stickers on the finished sheet
+            "begun": False,
+            "sheetSent": False,
+            "roster": [],
+            "ready": set(),
+            "submissions": {},
+            "stickers": [],
         }
         rooms[code] = room
         sid_to_room[sid] = code
@@ -356,9 +361,9 @@ def on_join_room(data=None):
             return
 
         if sid_to_room.get(sid) == code:
-            return                       # already in this room
+            return
         if sid in sid_to_room:
-            remove_member(sid)           # switching rooms
+            remove_member(sid)
         if room["started"]:
             room_error("That booth has already started.")
             return
@@ -384,7 +389,6 @@ def on_leave_room():
 
 @socketio.on("update_settings")
 def on_update_settings(data=None):
-    """Host changes shots / timer / strip style. Everyone gets the new values."""
     data = data if isinstance(data, dict) else {}
     sid = request.sid
     with lock:
@@ -417,7 +421,6 @@ def on_update_settings(data=None):
 
 @socketio.on("start_booth")
 def on_start_booth():
-    """Host presses Start: lock the room, tell everyone to get their camera ready."""
     sid = request.sid
     with lock:
         room = current_room(sid)
@@ -439,7 +442,6 @@ def on_start_booth():
             {"settings": dict(room["settings"]), "startIn": START_DELAY_SECONDS},
             to=room["code"],
         )
-        # If somebody's camera never opens, begin without waiting forever
         socketio.start_background_task(
             deadline_task, room, "ready", START_DELAY_SECONDS + READY_TIMEOUT_SECONDS
         )
@@ -447,7 +449,6 @@ def on_start_booth():
 
 @socketio.on("ready")
 def on_ready():
-    """A device's camera is open. When all are ready, everyone shoots together."""
     sid = request.sid
     with lock:
         room = current_room(sid)
@@ -457,15 +458,24 @@ def on_ready():
         if not member:
             return
         room["ready"].add(member["id"])
-        broadcast(room)                  # so everyone can see who we're still waiting for
+        broadcast(room)
         maybe_advance(room)
 
 
 @socketio.on("submit_shots")
 def on_submit_shots(data=None):
-    """A device uploads its shrunken photos."""
     data = data if isinstance(data, dict) else {}
     sid = request.sid
+    
+    # RATE LIMIT: Only allow 1 submission per 10 seconds per socket
+    with lock:
+        now = time.time()
+        last_submit = failed_joins.get(f"{sid}_last_submit", 0)
+        if now - last_submit < 10:
+            room_error("Please wait before submitting again.")
+            return
+        failed_joins[f"{sid}_last_submit"] = now
+    
     with lock:
         room = current_room(sid)
         if not room or not room["started"] or not room["begun"]:
@@ -477,7 +487,7 @@ def on_submit_shots(data=None):
             room_error("Too late: the sheet was already made without your photos.")
             return
         if member["id"] in room["submissions"]:
-            return                       # already uploaded
+            return
 
         shots = data.get("shots")
         if not valid_shots(shots, room["settings"]["totalShots"]):
@@ -485,21 +495,29 @@ def on_submit_shots(data=None):
             return
 
         room["submissions"][member["id"]] = {"name": member["name"], "shots": shots}
-        broadcast(room)                  # everyone's "x of y finished" list updates
+        broadcast(room)
         maybe_advance(room)
 
 
 @socketio.on("add_sticker")
 def on_add_sticker(data=None):
-    """Anyone in the booth can put a sticker on the finished sheet."""
     data = data if isinstance(data, dict) else {}
     sid = request.sid
+    
+    # RATE LIMIT: Only allow 1 sticker per second per socket
+    with lock:
+        now = time.time()
+        last_sticker = failed_joins.get(f"{sid}_last_sticker", 0)
+        if now - last_sticker < 1:
+            return  # Silently ignore (no error message to avoid spam)
+        failed_joins[f"{sid}_last_sticker"] = now
+    
     with lock:
         room = current_room(sid)
         if not room or not room["sheetSent"]:
             return
         if len(room["stickers"]) >= MAX_STICKERS:
-            return                       # the sheet is full, quietly ignore
+            return
 
         sticker_id = data.get("id")
         x, y = data.get("xPct"), data.get("yPct")
@@ -532,6 +550,61 @@ def on_remove_sticker(data=None):
             send_stickers(room)
 
 
+@app.route('/export_final_image', methods=['POST'])
+@limiter.limit("3 per minute")  # RATE LIMIT: Only 3 exports per minute per IP
+def export_final_image():
+    payload = request.get_json(silent=True) or {}
+    data = payload.get('image_data')
+    
+    if not data:
+        return jsonify({"error": "No image data provided"}), 400
+    
+    if not isinstance(data, str) or not data.startswith(SHOT_MAGIC):
+        return jsonify({"error": "Invalid image format"}), 400
+    
+    if len(data) > MAX_SHOT_CHARS * 3: 
+        return jsonify({"error": "Image too large"}), 400
+
+    try:
+        header, encoded = data.split(",", 1)
+        raw_bytes = base64.b64decode(encoded)
+        img = Image.open(io.BytesIO(raw_bytes))
+        img.verify() 
+    except Exception:
+        return jsonify({"error": "Corrupted or invalid image data"}), 400
+
+    cloudinary.config(
+        cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+        api_key=os.getenv("CLOUDINARY_API_KEY"),
+        api_secret=os.getenv("CLOUDINARY_API_SECRET"),
+        secure=True
+    )
+
+    try:
+        public_id = f"photobooth_sheets/{uuid.uuid4().hex}"
+        upload_result = cloudinary.uploader.upload(
+            raw_bytes,
+            public_id=public_id,
+            folder="photobooth_sheets",
+            resource_type="image",
+            transformation=[{"quality": "auto:good", "fetch_format": "auto"}]
+        )
+        
+        return jsonify({
+            "status": "success",
+            "image_url": upload_result['secure_url']
+        })
+        
+    except Exception as e:
+        print(f"Cloudinary Upload Error: {e}")
+        return jsonify({"error": "Failed to upload image to server"}), 500
+
+
 if __name__ == "__main__":
-    # Runs on 127.0.0.1 only. ngrok reaches it from your own machine.
+    print(" * Starting ngrok tunnel...")
+    public_url = ngrok.connect(5000)
+    print(f" * Ngrok Tunnel URL: {public_url}")
+    print(" * Copy the URL above and open it on your phone!")
+    print("-" * 50)
+    
     socketio.run(app, debug=DEBUG, allow_unsafe_werkzeug=True)

@@ -27,3 +27,35 @@ function downloadStripAsImage() {
 function printStrip() {
   window.print();
 }
+
+async function uploadFinalSheet(canvasElement) {
+    // 1. Get the base64 data from your canvas (this matches SHOT_MAGIC)
+    const imageData = canvasElement.toDataURL('image/jpeg', 0.9);
+
+    // 2. Show a loading state to the user
+    console.log("Uploading secure photo...");
+
+    try {
+        const response = await fetch('/export_final_image', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ image_data: imageData })
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            console.log("Success! Image URL:", result.image_url);
+            // TODO: Show the result.image_url to the user or trigger a download
+            window.open(result.image_url, '_blank'); 
+        } else {
+            console.error("Upload failed:", result.error);
+            alert("Sorry, there was an error saving your photo.");
+        }
+    } catch (error) {
+        console.error("Network error:", error);
+        alert("Network error. Please try again.");
+    }
+}

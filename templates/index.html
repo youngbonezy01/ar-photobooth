@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/png" href="{{ url_for('static', filename='images/logo.png') }}">
 <title>Shutter & Strip — Photobooth</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,500&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -12,12 +13,18 @@
 </head>
 <body>
 
+<div class="logo-container">
+<img src="{{ url_for('static', filename='images/logo.png') }}" 
+     alt="Shutter & Strip Logo" 
+     class="site-logo" 
+     style="width: 60px; height: 60px; border-radius: 50%; display: block;">
+</div>
+
 <div class="grain-overlay"></div>
 
 <!-- ===================== SCREEN: START ===================== -->
 <section id="screen-start" class="screen active">
   <div class="start-wrap">
-    <p class="eyebrow">shutter &amp; strip</p>
     <h1 class="hero-title">Strike a pose.<br>Take the strip home.</h1>
     <p class="hero-sub">A little photobooth for your browser — pick a filter, take a few shots, and walk away with a strip you can print or keep.</p>
 

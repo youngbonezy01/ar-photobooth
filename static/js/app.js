@@ -130,3 +130,21 @@ buildStickerPicker();
 updateStepperUI();
 setActiveTemplateSwatch(state.template);
 showScreen("start");
+
+
+// Add this helper function to your JS file
+function sanitizeInput(input) {
+    if (typeof input !== 'string') return '';
+    return input
+        .replace(/<[^>]*>/g, '') // Strip ANY HTML tags (e.g., <script>)
+        .replace(/[^\w\s\-']/g, '') // Optional: Only allow letters, numbers, spaces, hyphens, apostrophes
+        .trim()
+        .substring(0, 14); // Enforce the 14-character limit matching your backend NAME_MAX
+}
+
+// Example of how to use it when creating/joining a room:
+const rawName = document.getElementById('nameInput').value;
+const safeName = sanitizeInput(rawName);
+
+// Now send 'safeName' to the server via socket.emit
+socket.emit('create_room', { name: safeName });

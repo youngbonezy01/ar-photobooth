@@ -1,5 +1,18 @@
 /* room.css — styles for the booth lobby, waiting screen and booth mode */
 
+.logo-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+    margin: 20px 0;
+}
+
+.site-logo {
+    width: 60px;
+    height: auto;
+}
+
 .lobby-chip-grid{ display:flex; gap:10px; }
 .lobby-chip{
   flex:1;

@@ -547,3 +547,55 @@ function renderLobbySettings() {
     : "Only the host can change these.";
 
   const startBtn = document.getElementById("btn-start-booth");
+
+
+  // Add this helper function to your JS file
+function sanitizeInput(input) {
+    if (typeof input !== 'string') return '';
+    return input
+        .replace(/<[^>]*>/g, '') // Strip ANY HTML tags (e.g., <script>)
+        .replace(/[^\w\s\-']/g, '') // Optional: Only allow letters, numbers, spaces, hyphens, apostrophes
+        .trim()
+        .substring(0, 14); // Enforce the 14-character limit matching your backend NAME_MAX
+}
+
+// Example of how to use it when creating/joining a room:
+const rawName = document.getElementById('nameInput').value;
+const safeName = sanitizeInput(rawName);
+
+// Now send 'safeName' to the server via socket.emit
+socket.emit('create_room', { name: safeName });
+
+
+
+async function uploadFinalSheet(canvasElement) {
+    // 1. Get the base64 data from your canvas (this matches SHOT_MAGIC)
+    const imageData = canvasElement.toDataURL('image/jpeg', 0.9);
+
+    // 2. Show a loading state to the user
+    console.log("Uploading secure photo...");
+
+    try {
+        const response = await fetch('/export_final_image', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ image_data: imageData })
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+            console.log("Success! Image URL:", result.image_url);
+            // TODO: Show the result.image_url to the user or trigger a download
+            window.open(result.image_url, '_blank'); 
+        } else {
+            console.error("Upload failed:", result.error);
+            alert("Sorry, there was an error saving your photo.");
+        }
+    } catch (error) {
+        console.error("Network error:", error);
+        alert("Network error. Please try again.");
+    }
+}

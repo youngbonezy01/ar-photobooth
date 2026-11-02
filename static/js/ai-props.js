@@ -3,7 +3,10 @@
    ========================================== */
 
 // 1. Setup the hidden canvas for analyzing the video
-const analysisCanvas = document.createElement('canvas');
+let analysisCanvas;
+if (typeof analysisCanvas === 'undefined') {
+    analysisCanvas = ...
+}
 const analysisCtx = analysisCanvas.getContext('2d', { willReadFrequently: true });
 analysisCanvas.width = 64;
 analysisCanvas.height = 48;
