@@ -4,6 +4,44 @@ let activeEffects = { hat: false, noli: false, sunglasses: false, hearts: false 
 let arAnimationFrameId = null; // tracks the currently running rAF loop, so we can cancel it cleanly
 let faceLandmarker;
 let handLandmarker;
+let cameraStickers = null; // user-uploaded camera stickers (see camera-stickers.js)
+
+// Loads the camera-stickers module and builds its tray/editor UI.
+// camera-stickers.js is an ES module, so we use dynamic import() here,
+// the same way MediaPipe is loaded below. No <script type="module"> needed.
+async function initCameraStickers() {
+  try {
+    const { StickerManager } = await import("/static/js/camera-stickers.js");
+
+    // Put the "+ Sticker" button right under the AR Effects checkboxes.
+    // If the checkboxes can't be found, fall back to a floating tray.
+    const toggles = document.querySelectorAll(".effect-toggle");
+    let mount = document.body;
+    let inline = false;
+    if (toggles.length > 0) {
+      const lastToggle = toggles[toggles.length - 1];
+      const row = (lastToggle.closest("label") || lastToggle).parentElement;
+      const slot = document.createElement("div");
+      slot.id = "camera-sticker-slot";
+      row.insertAdjacentElement("afterend", slot);
+      mount = slot;
+      inline = true;
+    }
+
+    cameraStickers = new StickerManager({
+      canvas: null,          // set later by startARLoop
+      flipLandmarksX: false, // our effects already draw at raw landmark positions
+      flipPointerX: true,    // the overlay canvas is mirrored by CSS
+      mount,
+      inline
+    });
+    await cameraStickers.init();
+    if (!inline) cameraStickers.ui.root.hidden = true; // floating tray: shown only while the AR loop runs
+    console.log("✅ Camera stickers ready!");
+  } catch (error) {
+    console.error("❌ Camera stickers error:", error);
+  }
+}
 
 // Smooths out the pointing-gesture detection so a single flickery frame
 // doesn't make the sticker pop in and out. Requires the gesture to be
@@ -96,6 +134,12 @@ function startARLoop(videoElement, canvasElement) {
   // to startARLoop() (from the capture screen) to be silently ignored.
   stopARLoop();
 
+  // Point the camera stickers at this canvas (and show the floating tray, if that mode is used)
+  if (cameraStickers) {
+    cameraStickers.setCanvas(canvasElement);
+    if (!cameraStickers.inline) cameraStickers.ui.root.hidden = false;
+  }
+
   const ctx = canvasElement.getContext("2d");
   console.log("🎬 AR Loop started!");
 
@@ -106,13 +150,20 @@ function startARLoop(videoElement, canvasElement) {
       ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
 
       const now = performance.now();
+      let faceLandmarks = [];
+      let handLandmarks = [];
 
       try {
-        // Added activeEffects.hearts so face tracking runs if only hearts is active
-        if (faceLandmarker && (activeEffects.hat || activeEffects.sunglasses || activeEffects.hearts)) {
+        // Face tracking runs if any face effect is on, or if an uploaded
+        // sticker is placed on the face
+        const needFace =
+          activeEffects.hat || activeEffects.sunglasses || activeEffects.hearts ||
+          (cameraStickers && cameraStickers.needsFace());
+        if (faceLandmarker && needFace) {
           const faceResults = faceLandmarker.detectForVideo(videoElement, now);
-          if (faceResults.faceLandmarks && faceResults.faceLandmarks.length > 0) {
-            drawFaceEffects(ctx, faceResults.faceLandmarks[0], canvasElement.width, canvasElement.height);
+          faceLandmarks = faceResults.faceLandmarks || [];
+          if (faceLandmarks.length > 0) {
+            drawFaceEffects(ctx, faceLandmarks[0], canvasElement.width, canvasElement.height);
           }
         }
       } catch (e) {
@@ -121,12 +172,25 @@ function startARLoop(videoElement, canvasElement) {
       }
 
       try {
-        if (handLandmarker && activeEffects.noli) {
+        // Hand tracking runs for the Noli gesture, or if an uploaded
+        // sticker is placed on the hand
+        const needHands = activeEffects.noli || (cameraStickers && cameraStickers.needsHands());
+        if (handLandmarker && needHands) {
           const handResults = handLandmarker.detectForVideo(videoElement, now);
-          drawNoliSticker(ctx, handResults, canvasElement.width, canvasElement.height);
+          handLandmarks = handResults.landmarks || [];
+          if (activeEffects.noli) {
+            drawNoliSticker(ctx, handResults, canvasElement.width, canvasElement.height);
+          }
         }
       } catch (e) {
         console.error("Hand detect/draw error:", e);
+      }
+
+      try {
+        // Uploaded stickers are drawn last, on top of the other effects
+        if (cameraStickers) cameraStickers.draw(ctx, faceLandmarks, handLandmarks);
+      } catch (e) {
+        console.error("Camera sticker draw error:", e);
       }
     }
     arAnimationFrameId = requestAnimationFrame(detectAndDraw);
@@ -139,6 +203,7 @@ function stopARLoop() {
     cancelAnimationFrame(arAnimationFrameId);
     arAnimationFrameId = null;
   }
+  if (cameraStickers && !cameraStickers.inline) cameraStickers.ui.root.hidden = true;
 }
 
 // 4. Draw the Hat + Sunglasses + Hearts
@@ -300,6 +365,7 @@ function drawNoliSticker(ctx, handResults, w, h) {
 // 6. UI Listeners
 document.addEventListener("DOMContentLoaded", () => {
   initializeMediaPipe();
+  initCameraStickers();
   document.querySelectorAll(".effect-toggle").forEach(checkbox => {
     checkbox.addEventListener("change", (e) => {
       activeEffects[e.target.dataset.effect] = e.target.checked;
